@@ -1,6 +1,6 @@
 import pytest
 
-from mcp_jenkins.jenkins.model.build import Artifact, Build, BuildReplay
+from mcp_jenkins.jenkins.model.build import Artifact, Build, BuildReplay, ChangeSetItem, PipelineStage, PipelineStages
 from mcp_jenkins.server import build
 
 
@@ -198,3 +198,59 @@ async def test_get_build_artifact_url_with_number(mock_jenkins, mocker):
     mock_jenkins.get_item.assert_not_called()
     mock_jenkins.get_build_artifact_url.assert_called_once_with(fullname='job1', number=5, relative_path='report.html')
     assert result == 'https://jenkins.example.com/job/job1/5/artifact/report.html'
+
+
+@pytest.mark.asyncio
+async def test_get_build_history(mock_jenkins, mocker):
+    mock_jenkins.get_build_history.return_value = [
+        Build(number=2, url='u2', result='SUCCESS', timestamp=2, duration=10, building=False),
+        Build(number=1, url='u1', result='FAILURE', timestamp=1, duration=20, building=False),
+    ]
+
+    result = await build.get_build_history(mocker.Mock(), fullname='job1', count=5)
+    assert [b['number'] for b in result] == [2, 1]
+    mock_jenkins.get_build_history.assert_called_once_with(fullname='job1', count=5)
+
+
+@pytest.mark.asyncio
+async def test_get_build_stages_with_number(mock_jenkins, mocker):
+    mock_jenkins.get_build_stages.return_value = PipelineStages(
+        name='#5',
+        status='FAILED',
+        stages=[PipelineStage(id='10', name='Build', status='SUCCESS', durationMillis=100)],
+    )
+
+    result = await build.get_build_stages(mocker.Mock(), fullname='job1', number=5)
+    assert result['status'] == 'FAILED'
+    assert result['stages'][0]['name'] == 'Build'
+    mock_jenkins.get_item.assert_not_called()
+    mock_jenkins.get_build_stages.assert_called_once_with(fullname='job1', number=5)
+
+
+@pytest.mark.asyncio
+async def test_get_build_stages_resolves_last_build(mock_jenkins, mocker):
+    mock_jenkins.get_item.return_value.lastBuild.number = 7
+    mock_jenkins.get_build_stages.return_value = PipelineStages(stages=[])
+
+    await build.get_build_stages(mocker.Mock(), fullname='job1')
+    mock_jenkins.get_build_stages.assert_called_once_with(fullname='job1', number=7)
+
+
+@pytest.mark.asyncio
+async def test_get_build_stages_no_build(mock_jenkins, mocker):
+    mock_jenkins.get_item.return_value.lastBuild.number = None
+
+    with pytest.raises(ValueError, match='No build found for job: job1'):
+        await build.get_build_stages(mocker.Mock(), fullname='job1')
+
+
+@pytest.mark.asyncio
+async def test_get_build_changeset(mock_jenkins, mocker):
+    mock_jenkins.get_item.return_value.lastBuild.number = 3
+    mock_jenkins.get_build_changeset.return_value = [
+        ChangeSetItem(commitId='abc', author='Jane', msg='fix', timestamp=1, affectedPaths=['a.py']),
+    ]
+
+    result = await build.get_build_changeset(mocker.Mock(), fullname='job1')
+    assert result == [{'commitId': 'abc', 'author': 'Jane', 'msg': 'fix', 'timestamp': 1, 'affectedPaths': ['a.py']}]
+    mock_jenkins.get_build_changeset.assert_called_once_with(fullname='job1', number=3)

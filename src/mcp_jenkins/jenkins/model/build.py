@@ -26,3 +26,27 @@ class Build(BaseModel):
 
 class BuildReplay(BaseModel):
     scripts: list[str]
+
+
+class PipelineStage(BaseModel):
+    id: str
+    name: str
+    status: str | None = None
+    durationMillis: int | None = None
+    startTimeMillis: int | None = None
+
+
+class PipelineStages(BaseModel):
+    id: str | None = None
+    name: str | None = None
+    status: str | None = None
+    durationMillis: int | None = None
+    stages: list[PipelineStage] = []
+
+
+class ChangeSetItem(BaseModel):
+    commitId: str | None = None
+    author: str | None = None
+    msg: str | None = None
+    timestamp: int | None = None
+    affectedPaths: list[str] = []

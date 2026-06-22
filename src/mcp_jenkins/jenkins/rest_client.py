@@ -10,7 +10,7 @@ from requests.auth import HTTPBasicAuth
 from requests.exceptions import HTTPError
 
 from mcp_jenkins.jenkins import rest_endpoint
-from mcp_jenkins.jenkins.model.build import Artifact, Build, BuildReplay
+from mcp_jenkins.jenkins.model.build import Artifact, Build, BuildReplay, ChangeSetItem, PipelineStages
 from mcp_jenkins.jenkins.model.item import (
     FreeStyleProject,
     ItemType,
@@ -412,6 +412,91 @@ class Jenkins:
             rest_endpoint.BUILD_TEST_REPORT(folder=folder, name=name, number=number, depth=depth),
         )
         return response.json()
+
+    def get_build_history(self, *, fullname: str, count: int = 10) -> list[Build]:
+        """Get the most recent builds of a job.
+
+        Args:
+            fullname: The fullname of the job.
+            count: The maximum number of recent builds to return.
+
+        Returns:
+            A list of Build objects, most recent first.
+        """
+        folder, name = self._parse_fullname(fullname)
+        response = self.request(
+            'GET',
+            rest_endpoint.JOB_BUILDS(folder=folder, name=name, count=count),
+        )
+        return [Build.model_validate(b) for b in response.json().get('builds', [])]
+
+    def get_build_stages(self, *, fullname: str, number: int) -> PipelineStages:
+        """Get the pipeline stage breakdown of a build via the Stage View workflow API.
+
+        Returns empty stages for a freestyle job or when the pipeline-stage-view plugin is
+        absent (the wfapi endpoint 404s in both cases).
+
+        Args:
+            fullname: The fullname of the job.
+            number: The build number.
+
+        Returns:
+            A PipelineStages object (empty stages if not a pipeline build).
+        """
+        folder, name = self._parse_fullname(fullname)
+        try:
+            response = self.request(
+                'GET',
+                rest_endpoint.BUILD_WORKFLOW_DESCRIBE(folder=folder, name=name, number=number),
+            )
+        except HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                return PipelineStages()
+            raise
+        return PipelineStages.model_validate(response.json())
+
+    def get_build_changeset(self, *, fullname: str, number: int) -> list[ChangeSetItem]:
+        """Get the SCM changes (commits) included in a build.
+
+        Merges the freestyle `changeSet` (single object) and pipeline `changeSets` (list)
+        shapes, flattening author.fullName to a plain author name.
+
+        Args:
+            fullname: The fullname of the job.
+            number: The build number.
+
+        Returns:
+            A list of ChangeSetItem objects across all change sets.
+        """
+        folder, name = self._parse_fullname(fullname)
+        response = self.request(
+            'GET',
+            rest_endpoint.BUILD_CHANGESETS(folder=folder, name=name, number=number),
+        )
+        data = response.json()
+
+        raw_sets = []
+        change_set = data.get('changeSet')
+        if isinstance(change_set, dict):
+            raw_sets.append(change_set)
+        change_sets = data.get('changeSets')
+        if isinstance(change_sets, list):
+            raw_sets.extend(change_sets)
+
+        items = []
+        for raw in raw_sets:
+            for item in (raw or {}).get('items', []):
+                author = item.get('author') or {}
+                items.append(
+                    ChangeSetItem(
+                        commitId=item.get('commitId'),
+                        author=author.get('fullName'),
+                        msg=item.get('msg'),
+                        timestamp=item.get('timestamp'),
+                        affectedPaths=item.get('affectedPaths', []),
+                    )
+                )
+        return items
 
     def get_build_artifacts(self, *, fullname: str, number: int) -> list[Artifact]:
         """Get the list of artifacts from a specific build.

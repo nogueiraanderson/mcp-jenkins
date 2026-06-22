@@ -203,3 +203,59 @@ async def get_build_artifact_url(
         number = jenkins(ctx, master).get_item(fullname=fullname, depth=1).lastBuild.number
 
     return jenkins(ctx, master).get_build_artifact_url(fullname=fullname, number=number, relative_path=relative_path)
+
+
+@mcp.tool(tags=['read'])
+async def get_build_history(ctx: Context, fullname: str, count: int = 10, master: MasterArg = None) -> list[dict]:
+    """Get the most recent builds of a Jenkins job.
+
+    Args:
+        fullname: The fullname of the job
+        count: Maximum number of recent builds to return (most recent first)
+
+    Returns:
+        A list of builds with number, result, timestamp, duration, building, url
+    """
+    builds = jenkins(ctx, master).get_build_history(fullname=fullname, count=count)
+    return [b.model_dump(exclude_none=True) for b in builds]
+
+
+@mcp.tool(tags=['read'])
+async def get_build_stages(ctx: Context, fullname: str, number: int | None = None, master: MasterArg = None) -> dict:
+    """Get the pipeline stage breakdown of a build (which stage ran/failed and per-stage durations).
+
+    Args:
+        fullname: The fullname of the job
+        number: The number of the build, if None, get the last build
+
+    Returns:
+        The run status plus a stages list; empty stages for a non-pipeline job
+    """
+    if number is None:
+        number = jenkins(ctx, master).get_item(fullname=fullname, depth=1).lastBuild.number
+    if number is None:
+        raise ValueError(f'No build found for job: {fullname}')
+
+    return jenkins(ctx, master).get_build_stages(fullname=fullname, number=number).model_dump(exclude_none=True)
+
+
+@mcp.tool(tags=['read'])
+async def get_build_changeset(
+    ctx: Context, fullname: str, number: int | None = None, master: MasterArg = None
+) -> list[dict]:
+    """Get the SCM changes (commits) included in a build.
+
+    Args:
+        fullname: The fullname of the job
+        number: The number of the build, if None, get the last build
+
+    Returns:
+        A list of changes: commitId, author, msg, timestamp, affectedPaths
+    """
+    if number is None:
+        number = jenkins(ctx, master).get_item(fullname=fullname, depth=1).lastBuild.number
+    if number is None:
+        raise ValueError(f'No build found for job: {fullname}')
+
+    changes = jenkins(ctx, master).get_build_changeset(fullname=fullname, number=number)
+    return [c.model_dump(exclude_none=True) for c in changes]

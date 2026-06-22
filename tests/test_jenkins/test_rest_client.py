@@ -2,7 +2,7 @@ import pytest
 from requests import HTTPError
 
 from mcp_jenkins.jenkins import Jenkins
-from mcp_jenkins.jenkins.model.build import Artifact, Build, BuildReplay
+from mcp_jenkins.jenkins.model.build import Artifact, Build, BuildReplay, ChangeSetItem
 from mcp_jenkins.jenkins.model.item import (
     Folder,
     FreeStyleProject,
@@ -829,6 +829,87 @@ class TestBuild:
     def test_get_build_artifact_url_nested_job(self, jenkins):
         url = jenkins.get_build_artifact_url(fullname='folder/example-job', number=42, relative_path='trace.zip')
         assert url == 'https://example.com/job/folder/job/example-job/42/artifact/trace.zip'
+
+    def test_get_build_history(self, jenkins, mock_session, mocker):
+        mock_session.request.return_value = mocker.Mock(
+            json=lambda: {
+                'builds': [
+                    {'number': 3, 'url': 'u3', 'result': 'SUCCESS', 'timestamp': 3, 'duration': 10, 'building': False},
+                    {'number': 2, 'url': 'u2', 'result': 'FAILURE', 'timestamp': 2, 'duration': 20, 'building': False},
+                ]
+            }
+        )
+
+        result = jenkins.get_build_history(fullname='example-job', count=5)
+        assert [b.number for b in result] == [3, 2]
+        url = mock_session.request.call_args.kwargs['url']
+        assert url.startswith('https://example.com/job/example-job/api/json?tree=builds[')
+        assert url.endswith(']{0,5}')
+
+    def test_get_build_stages(self, jenkins, mock_session, mocker):
+        mock_session.request.return_value = mocker.Mock(
+            json=lambda: {
+                'name': '#5',
+                'status': 'FAILED',
+                'stages': [{'id': '10', 'name': 'Build', 'status': 'SUCCESS', 'durationMillis': 100}],
+            }
+        )
+
+        result = jenkins.get_build_stages(fullname='example-job', number=5)
+        assert result.status == 'FAILED'
+        assert result.stages[0].name == 'Build'
+        assert mock_session.request.call_args.kwargs['url'].endswith('/job/example-job/5/wfapi/describe')
+
+    def test_get_build_stages_freestyle_404(self, jenkins, mock_session, mocker):
+        response = mocker.Mock(status_code=404)
+        response.raise_for_status.side_effect = HTTPError(response=mocker.Mock(status_code=404))
+        mock_session.request.return_value = response
+
+        assert jenkins.get_build_stages(fullname='example-job', number=5).stages == []
+
+    def test_get_build_changeset_freestyle(self, jenkins, mock_session, mocker):
+        mock_session.request.return_value = mocker.Mock(
+            json=lambda: {
+                'changeSet': {
+                    'items': [
+                        {
+                            'commitId': 'abc',
+                            'author': {'fullName': 'Jane'},
+                            'msg': 'fix',
+                            'timestamp': 1,
+                            'affectedPaths': ['src/a.py'],
+                        }
+                    ]
+                }
+            }
+        )
+
+        assert jenkins.get_build_changeset(fullname='example-job', number=1) == [
+            ChangeSetItem(commitId='abc', author='Jane', msg='fix', timestamp=1, affectedPaths=['src/a.py'])
+        ]
+
+    def test_get_build_changeset_pipeline_merges_sets(self, jenkins, mock_session, mocker):
+        mock_session.request.return_value = mocker.Mock(
+            json=lambda: {
+                'changeSets': [
+                    {
+                        'items': [
+                            {
+                                'commitId': 'def',
+                                'author': {'fullName': 'Sam'},
+                                'msg': 'feat',
+                                'timestamp': 2,
+                                'affectedPaths': ['pom.xml'],
+                            }
+                        ]
+                    }
+                ]
+            }
+        )
+
+        assert jenkins.get_build_changeset(fullname='example-job', number=1) == [
+            ChangeSetItem(commitId='def', author='Sam', msg='feat', timestamp=2, affectedPaths=['pom.xml'])
+        ]
 
 
 class TestItem:

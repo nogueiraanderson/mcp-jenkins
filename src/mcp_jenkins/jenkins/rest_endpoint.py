@@ -40,6 +40,15 @@ BUILD_PARAMETERS = RestEndpoint('{folder}job/{name}/{number}/api/json?tree=actio
 BUILD_TEST_REPORT = RestEndpoint('{folder}job/{name}/{number}/testReport/api/json?depth={depth}')
 BUILD_ARTIFACT = RestEndpoint('{folder}job/{name}/{number}/artifact/{relative_path}')
 BUILD_ARTIFACTS = RestEndpoint('{folder}job/{name}/{number}/api/json?tree=artifacts[fileName,relativePath,displayPath]')
+JOB_BUILDS = RestEndpoint(
+    '{folder}job/{name}/api/json?tree=builds[number,result,timestamp,duration,building,url]{{0,{count}}}'
+)
+BUILD_WORKFLOW_DESCRIBE = RestEndpoint('{folder}job/{name}/{number}/wfapi/describe')
+BUILD_CHANGESETS = RestEndpoint(
+    '{folder}job/{name}/{number}/api/json'
+    '?tree=changeSet[items[commitId,author[fullName],msg,timestamp,affectedPaths]],'
+    'changeSets[items[commitId,author[fullName],msg,timestamp,affectedPaths]]'
+)
 
 PLUGIN_LIST = RestEndpoint('pluginManager/api/json?depth={depth}')
 PLUGIN_LIST_TREE = RestEndpoint('pluginManager/api/json?tree=plugins[{tree}]')
