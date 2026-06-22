@@ -817,6 +817,14 @@ class Jenkins:
             if p.get('backupVersion') and p.get('downgradable')
         ]
 
+    def get_version(self) -> str:
+        """Return the Jenkins core version from the X-Jenkins response header.
+
+        Doubles as a lightweight liveness/auth check: a successful call means the
+        master is reachable and the credentials are accepted.
+        """
+        return self._get_jenkins_version()
+
     def _get_jenkins_version(self) -> str:
         """Get the Jenkins core version from response header."""
         response = self.request('GET', '', crumb=False)
