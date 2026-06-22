@@ -56,7 +56,7 @@ async def list_fleet_plugins(short_name: str | None = None, full: bool = False) 
         try:
             client = client_for(master.name)
             core[master.name] = client.get_version()
-            plugins = client.get_plugins(depth=0)
+            plugins = client.get_plugins(depth=1)  # depth>=1 to include the plugins array
             per_master[master.name] = {p['shortName']: p.get('version') for p in plugins if p.get('shortName')}
         except Exception as e:  # noqa: BLE001
             errors[master.name] = str(e)
