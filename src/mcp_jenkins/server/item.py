@@ -8,13 +8,28 @@ from mcp_jenkins.server import mcp
 
 
 @mcp.tool(tags=['read'])
-async def get_all_items(ctx: Context, master: MasterArg = None) -> list[dict]:
-    """Get all items from Jenkins
+async def get_all_items(ctx: Context, limit: int = 200, master: MasterArg = None) -> dict:
+    """List jobs and folders on a master as a flat, compact list.
+
+    Returns each item's fullname, class, and color only (NOT the nested folder tree or build
+    detail), so the result stays small on large masters. To filter by name use query_items; for
+    one item's full detail use get_item.
+
+    Args:
+        limit: Maximum items to return (capped at 2000). On a large master, narrow with
+            query_items rather than raising this.
 
     Returns:
-        A list of items
+        A dict: items (the compact list), total (items found), returned, and truncated (bool).
     """
-    return [item.model_dump(exclude_none=True) for item in jenkins(ctx, master).get_items()]
+    limit = max(1, min(limit, 2000))
+    items = [i.model_dump(exclude_none=True, exclude={'jobs', 'lastBuild'}) for i in jenkins(ctx, master).get_items()]
+    return {
+        'items': items[:limit],
+        'total': len(items),
+        'returned': min(len(items), limit),
+        'truncated': len(items) > limit,
+    }
 
 
 @mcp.tool(tags=['read'])
@@ -61,28 +76,37 @@ async def query_items(
     fullname_pattern: str = None,
     color_pattern: str = None,
     folder_depth: int | None = None,
+    limit: int = 200,
     master: MasterArg = None,
-) -> list[dict]:
-    """Query items from Jenkins
+) -> dict:
+    """Query items by field patterns, returned as a flat, compact list.
 
     Args:
         class_pattern: The pattern of the _class
         fullname_pattern: The pattern of the fullname
         color_pattern: The pattern of the color
         folder_depth: The maximum depth of folders to traverse. If None, traverses all levels.
+        limit: Maximum items to return (capped at 2000).
 
     Returns:
-        A list of items
+        A dict: items (compact: fullname, class, color), total (items found), returned, truncated.
     """
-    return [
-        item.model_dump(exclude_none=True)
-        for item in jenkins(ctx, master).query_items(
+    limit = max(1, min(limit, 2000))
+    items = [
+        i.model_dump(exclude_none=True, exclude={'jobs', 'lastBuild'})
+        for i in jenkins(ctx, master).query_items(
             class_pattern=class_pattern,
             fullname_pattern=fullname_pattern,
             color_pattern=color_pattern,
             folder_depth=folder_depth,
         )
     ]
+    return {
+        'items': items[:limit],
+        'total': len(items),
+        'returned': min(len(items), limit),
+        'truncated': len(items) > limit,
+    }
 
 
 @mcp.tool(tags=['write'])

@@ -20,22 +20,28 @@ async def test_get_all_items(mock_jenkins, mocker):
         Folder(fullname='job2', jobs=[], class_='Folder', name='folder', url='1'),
     ]
 
-    assert await item.get_all_items(mocker.Mock()) == [
-        {
-            'class_': 'Job',
-            'color': 'blue',
-            'fullname': 'job1',
-            'name': 'job1',
-            'url': '1',
-        },
-        {
-            'class_': 'Folder',
-            'fullname': 'job2',
-            'jobs': [],
-            'name': 'folder',
-            'url': '1',
-        },
+    result = await item.get_all_items(mocker.Mock())
+
+    assert result['total'] == 2
+    assert result['truncated'] is False
+    assert result['items'] == [
+        {'class_': 'Job', 'color': 'blue', 'fullname': 'job1', 'name': 'job1', 'url': '1'},
+        {'class_': 'Folder', 'fullname': 'job2', 'name': 'folder', 'url': '1'},
     ]
+
+
+@pytest.mark.asyncio
+async def test_get_all_items_truncates(mock_jenkins, mocker):
+    mock_jenkins.get_items.return_value = [
+        Job(fullname=f'job{i}', color='blue', name=f'job{i}', url='1', class_='Job') for i in range(5)
+    ]
+
+    result = await item.get_all_items(mocker.Mock(), limit=2)
+
+    assert result['total'] == 5
+    assert result['returned'] == 2
+    assert result['truncated'] is True
+    assert len(result['items']) == 2
 
 
 @pytest.mark.asyncio
@@ -73,19 +79,16 @@ async def test_query_items(mock_jenkins, mocker):
         Job(fullname='job1', color='blue', name='job1', url='1', class_='Job'),
     ]
 
-    assert await item.query_items(
+    result = await item.query_items(
         mocker.Mock(),
         class_pattern='.*',
         fullname_pattern='job.*',
         color_pattern='blue',
-    ) == [
-        {
-            'class_': 'Job',
-            'color': 'blue',
-            'fullname': 'job1',
-            'name': 'job1',
-            'url': '1',
-        },
+    )
+
+    assert result['total'] == 1
+    assert result['items'] == [
+        {'class_': 'Job', 'color': 'blue', 'fullname': 'job1', 'name': 'job1', 'url': '1'},
     ]
 
 
