@@ -72,6 +72,12 @@ async def healthz(_request: Request) -> PlainTextResponse:
     return PlainTextResponse('OK', status_code=200)
 
 
+# Register the per-request audit middleware (user attribution -> structured JSON -> Loki).
+from mcp_jenkins.server.audit import AuditMiddleware  # noqa: E402
+
+mcp.add_middleware(AuditMiddleware())
+
+
 # Import tool modules to register them with the MCP server
 # This must happen after mcp is created so the @mcp.tool() decorators can reference it
 from mcp_jenkins.server import build, fleet, item, node, queue, readme, script, search, view  # noqa: F401, E402
