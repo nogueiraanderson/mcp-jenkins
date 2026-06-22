@@ -70,3 +70,27 @@ def client_for(name: str) -> Jenkins:
         timeout=fleet.timeout,
         verify_ssl=master.verify_ssl,
     )
+
+
+def write_preflight() -> list[str]:
+    """Probe each master's identity for dangerous perms; return violations (empty = safe to write).
+
+    The fail-closed gate for operate (write) mode: a GET (no redirect, no raise) returning 200 on
+    these admin endpoints means the perm is held, so write mode is refused if the service identity
+    can run scripts or create jobs (the proxy for configure/delete). A probe that errors is logged
+    and skipped, so a transient down master neither weakens the gate nor blocks the rest of startup.
+    """
+    checks = (('script', 'RunScripts'), ('view/all/newJob', 'Create'))
+    violations: list[str] = []
+    fleet = get_fleet()
+    for master in fleet.masters:
+        client = client_for(master.name)
+        for path, perm in checks:
+            try:
+                resp = client._session.get(client.endpoint_url(path), timeout=fleet.timeout, allow_redirects=False)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f'write_preflight: {master.name} probe {path} errored: {e}')
+                continue
+            if resp.status_code == 200:
+                violations.append(f'{master.name}: identity holds {perm} (GET /{path} -> 200)')
+    return violations

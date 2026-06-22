@@ -109,7 +109,7 @@ async def query_items(
     }
 
 
-@mcp.tool(tags=['write'])
+@mcp.tool(tags=['operate'])
 async def build_item(
     ctx: Context,
     fullname: str,

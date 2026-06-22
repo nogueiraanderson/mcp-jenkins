@@ -125,7 +125,7 @@ async def get_build_parameters(
     return jenkins(ctx, master).get_build_parameters(fullname=fullname, number=number)
 
 
-@mcp.tool(tags=['write'])
+@mcp.tool(tags=['operate'])
 async def stop_build(ctx: Context, fullname: str, number: int, master: MasterArg = None) -> None:
     """Stop a specific build in Jenkins
 
@@ -259,3 +259,28 @@ async def get_build_changeset(
 
     changes = jenkins(ctx, master).get_build_changeset(fullname=fullname, number=number)
     return [c.model_dump(exclude_none=True) for c in changes]
+
+
+@mcp.tool(tags=['operate'])
+async def replay_build(ctx: Context, fullname: str, number: int | None = None, master: MasterArg = None) -> int:
+    """Re-run a job using the same parameters as a previous build (retrigger a probe).
+
+    Triggers a fresh build with the parameters of build `number` (or the last build). Does not
+    modify the job config. Requires the jenkins-mcp-writers group.
+
+    Args:
+        fullname: The fullname of the job
+        number: The build to copy parameters from; if None, the last build
+
+    Returns:
+        The queue item number of the newly triggered build.
+    """
+    if number is None:
+        number = jenkins(ctx, master).get_item(fullname=fullname, depth=1).lastBuild.number
+    if number is None:
+        raise ValueError(f'No build found for job: {fullname}')
+
+    params = jenkins(ctx, master).get_build_parameters(fullname=fullname, number=number)
+    if params:
+        return jenkins(ctx, master).build_item(fullname=fullname, build_type='buildWithParameters', data=params)
+    return jenkins(ctx, master).build_item(fullname=fullname, build_type='build')

@@ -90,13 +90,13 @@ async def test_middleware_emits_read_record(capture_audit, mocker):
 
 
 @pytest.mark.asyncio
-async def test_middleware_flags_write_and_error_anonymous(capture_audit, mocker):
+async def test_middleware_error_on_read_tool(capture_audit, mocker):
     mocker.patch('mcp_jenkins.server.audit.get_access_token', return_value=None)
     mocker.patch('mcp_jenkins.server.audit.get_http_request', side_effect=RuntimeError)
 
     ctx = mocker.Mock()
-    ctx.message.name = 'build_item'
-    ctx.message.arguments = {'fullname': 'j', 'data': {'P': 'v'}}
+    ctx.message.name = 'get_all_items'
+    ctx.message.arguments = {}
     ctx.timestamp = datetime.now(UTC)
 
     async def call_next(_):
@@ -107,11 +107,60 @@ async def test_middleware_flags_write_and_error_anonymous(capture_audit, mocker)
         await audit.AuditMiddleware().on_call_tool(ctx, call_next)
 
     rec = json.loads(capture_audit[-1])
-    assert rec['is_write'] is True
     assert rec['status'] == 'error'
     assert rec['error'] == 'RuntimeError'
     assert rec['sub'] == 'anonymous'
-    assert rec['args'] == {'fullname': 'j', 'data_keys': ['P']}  # param value 'v' never logged
+
+
+@pytest.mark.asyncio
+async def test_operate_tool_denied_without_writers_group(capture_audit, mocker):
+    from fastmcp.exceptions import ToolError
+
+    mocker.patch('mcp_jenkins.server.audit.get_access_token', return_value=None)  # anonymous, no groups
+    mocker.patch('mcp_jenkins.server.audit.get_http_request', side_effect=RuntimeError)
+
+    ctx = mocker.Mock()
+    ctx.message.name = 'build_item'
+    ctx.message.arguments = {'fullname': 'j', 'data': {'P': 'v'}}
+    ctx.timestamp = datetime.now(UTC)
+
+    called = {'ran': False}
+
+    async def call_next(_):
+        called['ran'] = True
+        return 'ran'
+
+    with pytest.raises(ToolError):
+        await audit.AuditMiddleware().on_call_tool(ctx, call_next)
+
+    assert called['ran'] is False  # denied before the tool executed
+    rec = json.loads(capture_audit[-1])
+    assert rec['tool'] == 'build_item'
+    assert rec['is_write'] is True
+    assert rec['status'] == 'denied'
+
+
+@pytest.mark.asyncio
+async def test_operate_tool_allowed_with_writers_group(capture_audit, mocker):
+    token = mocker.Mock(claims={'sub': 'u1', 'groups': ['jenkins-mcp-writers']}, client_id='c')
+    mocker.patch('mcp_jenkins.server.audit.get_access_token', return_value=token)
+    mocker.patch('mcp_jenkins.server.audit.get_http_request', side_effect=RuntimeError)
+
+    ctx = mocker.Mock()
+    ctx.message.name = 'build_item'
+    ctx.message.arguments = {'fullname': 'j', 'data': {'P': 'secret'}}
+    ctx.timestamp = datetime.now(UTC)
+
+    async def call_next(_):
+        return 'queued'
+
+    result = await audit.AuditMiddleware().on_call_tool(ctx, call_next)
+
+    assert result == 'queued'
+    rec = json.loads(capture_audit[-1])
+    assert rec['status'] == 'ok'
+    assert rec['is_write'] is True
+    assert rec['args'] == {'fullname': 'j', 'data_keys': ['P']}  # param value 'secret' never logged
 
 
 @pytest.mark.asyncio

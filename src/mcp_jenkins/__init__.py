@@ -34,6 +34,13 @@ if sys.platform == 'win32':
     help='Whether to run in read-only mode, default is False',
 )
 @click.option(
+    '--enable-operate',
+    default=False,
+    is_flag=True,
+    help='Enable build-lifecycle (operate) tools after a fail-closed permission preflight; '
+    'still gated to the jenkins-mcp-writers group per call. Mutually exclusive with --read-only.',
+)
+@click.option(
     '--jenkins-session-singleton/--no-jenkins-session-singleton',
     default=True,
     help='In the same session, reuse the per-master Jenkins client, reducing instantiations and crumb requests',
@@ -57,6 +64,7 @@ def main(
     jenkins_master: str,
     jenkins_fleet_file: str,
     read_only: bool,  # noqa: FBT001
+    enable_operate: bool,  # noqa: FBT001
     jenkins_session_singleton: bool,  # noqa: FBT001
     transport: str,
     host: str,
@@ -73,6 +81,17 @@ def main(
 
     if read_only:
         mcp.enable(tags={'read'}, only=True)
+    elif enable_operate:
+        from mcp_jenkins.core.fleet import write_preflight
+
+        violations = write_preflight()
+        if violations:
+            for v in violations:
+                logger.error(f'write preflight violation: {v}')
+            logger.error('Refusing operate (write) mode: the Jenkins service identity is over-privileged.')
+            sys.exit(1)
+        mcp.enable(tags={'read', 'operate'}, only=True)
+        logger.info('Operate (write) mode enabled: read + operate tools, gated to the jenkins-mcp-writers group.')
 
     if transport == 'stdio':
         asyncio.run(mcp.run_async(transport=transport))

@@ -15,22 +15,20 @@ import time
 import uuid
 from typing import Any
 
+from fastmcp.exceptions import ToolError
 from fastmcp.server.dependencies import get_access_token, get_http_request
 from fastmcp.server.middleware.middleware import Middleware, MiddlewareContext
 from loguru import logger
 from prometheus_client import Counter, Histogram
 
-# Tool names tagged write in the server modules; keep in sync with @mcp.tool(tags=['write']).
-_WRITE_TOOLS = frozenset(
-    {
-        'set_item_config',
-        'build_item',
-        'stop_build',
-        'cancel_queue_item',
-        'set_node_config',
-        'run_groovy_script',
-    }
-)
+# Config/script-mutating tools (job UPDATE, node config, script console): NEVER served in operate
+# mode; they stay tagged 'write' in the server modules so read-only/operate both exclude them.
+_CONFIG_TOOLS = frozenset({'set_item_config', 'set_node_config', 'run_groovy_script'})
+# Build-lifecycle tools: served only in write-enable (operate) mode AND only to the writers group.
+# They trigger/replay/stop/cancel builds; they never update or delete job config.
+_OPERATE_TOOLS = frozenset({'build_item', 'replay_build', 'stop_build', 'cancel_queue_item'})
+_WRITE_TOOLS = _OPERATE_TOOLS | _CONFIG_TOOLS  # all mutating tools, for the is_write audit flag
+_WRITERS_GROUP = 'jenkins-mcp-writers'
 
 # Argument keys safe to log verbatim (job names, build numbers, search patterns, flags). Everything
 # else is dropped; a build-parameter dict ('data') is reduced to its KEYS. Never log raw values.
@@ -68,6 +66,7 @@ logger.add(sys.stdout, level='INFO', format='{message}', filter=lambda r: r['ext
 # Aggregate usage metrics (NO user label -> no cardinality blowup); exposed at /metrics.
 _CALLS = Counter('mcp_tool_calls', 'Total MCP tool calls.', ['tool', 'status', 'is_write'])
 _DURATION = Histogram('mcp_tool_duration_seconds', 'MCP tool call duration in seconds.', ['tool', 'is_write'])
+_DENIED = Counter('mcp_authz_denied', 'Authorization denials on tool calls.', ['tool', 'reason'])
 
 
 def _hash(value: str | None) -> str | None:
@@ -97,6 +96,7 @@ def _identity() -> dict:
         'sub': claims.get('sub'),
         'preferred_username': claims.get('preferred_username'),
         'name': claims.get('name'),
+        'groups': claims.get('groups', []),
         'email_hash': _hash(claims.get('email')),
         'client_id': token.client_id,
         'scopes': token.scopes,
@@ -135,13 +135,20 @@ class AuditMiddleware(Middleware):
             **_identity(),
         }
         start = time.perf_counter()
+        denied = tool in _OPERATE_TOOLS and _WRITERS_GROUP not in (record.get('groups') or [])
         try:
+            if denied:
+                record['status'] = 'denied'
+                _DENIED.labels(tool=tool, reason='not_writer').inc()
+                msg = f'{tool} requires the {_WRITERS_GROUP} Authentik group.'
+                raise ToolError(msg)
             result = await call_next(context)
             record['status'] = 'ok'
             return result
         except Exception as e:  # noqa: BLE001
-            record['status'] = 'error'
-            record['error'] = type(e).__name__
+            if record.get('status') != 'denied':
+                record['status'] = 'error'
+                record['error'] = type(e).__name__
             raise
         finally:
             duration_s = time.perf_counter() - start
