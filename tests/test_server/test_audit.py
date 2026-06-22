@@ -112,3 +112,25 @@ async def test_middleware_flags_write_and_error_anonymous(capture_audit, mocker)
     assert rec['error'] == 'RuntimeError'
     assert rec['sub'] == 'anonymous'
     assert rec['args'] == {'fullname': 'j', 'data_keys': ['P']}  # param value 'v' never logged
+
+
+@pytest.mark.asyncio
+async def test_middleware_increments_metrics(capture_audit, mocker):
+    from prometheus_client import REGISTRY
+
+    mocker.patch('mcp_jenkins.server.audit.get_access_token', return_value=None)
+    mocker.patch('mcp_jenkins.server.audit.get_http_request', side_effect=RuntimeError)
+
+    ctx = mocker.Mock()
+    ctx.message.name = 'get_all_items'
+    ctx.message.arguments = {}
+    ctx.timestamp = datetime.now(UTC)
+
+    async def call_next(_):
+        return 'ok'
+
+    labels = {'tool': 'get_all_items', 'status': 'ok', 'is_write': 'false'}
+    before = REGISTRY.get_sample_value('mcp_tool_calls_total', labels) or 0.0
+    await audit.AuditMiddleware().on_call_tool(ctx, call_next)
+    after = REGISTRY.get_sample_value('mcp_tool_calls_total', labels) or 0.0
+    assert after == before + 1

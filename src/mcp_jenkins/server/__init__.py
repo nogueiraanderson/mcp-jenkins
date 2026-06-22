@@ -7,7 +7,7 @@ from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
 from starlette.middleware import Middleware as ASGIMiddleware
 from starlette.requests import Request
-from starlette.responses import PlainTextResponse
+from starlette.responses import PlainTextResponse, Response
 
 from mcp_jenkins.core import AuthMiddleware, LifespanContext, lifespan
 
@@ -40,7 +40,7 @@ def _build_auth() -> 'RemoteAuthProvider | None':
         token_verifier=verifier,
         authorization_servers=[AnyHttpUrl(issuer)],
         base_url=base_url,
-        scopes_supported=['jenkins:read'],
+        scopes_supported=['openid', 'profile'],
         resource_name='Jenkins MCP',
     )
 
@@ -70,6 +70,14 @@ mcp = JenkinsMCP('mcp-jenkins', lifespan=lifespan, auth=_build_auth())
 async def healthz(_request: Request) -> PlainTextResponse:
     """Liveness probe endpoint. Always returns 200 for kubernetes health checks."""
     return PlainTextResponse('OK', status_code=200)
+
+
+@mcp.custom_route('/metrics', methods=['GET'])
+async def metrics(_request: Request) -> Response:
+    """Prometheus metrics endpoint: aggregate tool-call counters (no user labels)."""
+    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 # Register the per-request audit middleware (user attribution -> structured JSON -> Loki).

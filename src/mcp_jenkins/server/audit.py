@@ -18,6 +18,7 @@ from typing import Any
 from fastmcp.server.dependencies import get_access_token, get_http_request
 from fastmcp.server.middleware.middleware import Middleware, MiddlewareContext
 from loguru import logger
+from prometheus_client import Counter, Histogram
 
 # Tool names tagged write in the server modules; keep in sync with @mcp.tool(tags=['write']).
 _WRITE_TOOLS = frozenset(
@@ -64,6 +65,10 @@ _SAFE_ARG_KEYS = frozenset(
 # Dedicated stdout sink: emit ONLY audit records, as one raw JSON line (parsed by Loki `| json`).
 logger.add(sys.stdout, level='INFO', format='{message}', filter=lambda r: r['extra'].get('audit', False))
 
+# Aggregate usage metrics (NO user label -> no cardinality blowup); exposed at /metrics.
+_CALLS = Counter('mcp_tool_calls', 'Total MCP tool calls.', ['tool', 'status', 'is_write'])
+_DURATION = Histogram('mcp_tool_duration_seconds', 'MCP tool call duration in seconds.', ['tool', 'is_write'])
+
 
 def _hash(value: str | None) -> str | None:
     return hashlib.sha256(value.encode()).hexdigest()[:16] if value else None
@@ -91,8 +96,10 @@ def _identity() -> dict:
     return {
         'sub': claims.get('sub'),
         'preferred_username': claims.get('preferred_username'),
+        'name': claims.get('name'),
         'email_hash': _hash(claims.get('email')),
         'client_id': token.client_id,
+        'scopes': token.scopes,
         'aud': claims.get('aud'),
         'iss': claims.get('iss'),
         'iat': claims.get('iat'),
@@ -137,5 +144,9 @@ class AuditMiddleware(Middleware):
             record['error'] = type(e).__name__
             raise
         finally:
-            record['duration_ms'] = round((time.perf_counter() - start) * 1000, 1)
+            duration_s = time.perf_counter() - start
+            record['duration_ms'] = round(duration_s * 1000, 1)
+            is_write_label = 'true' if record['is_write'] else 'false'
+            _CALLS.labels(tool=tool, status=record['status'], is_write=is_write_label).inc()
+            _DURATION.labels(tool=tool, is_write=is_write_label).observe(duration_s)
             logger.bind(audit=True).info(json.dumps(record, default=str))
