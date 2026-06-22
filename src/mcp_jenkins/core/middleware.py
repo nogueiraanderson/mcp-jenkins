@@ -1,9 +1,14 @@
-from loguru import logger
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 
 class AuthMiddleware:
-    """ASGI-compliant middleware to extract Jenkins auth from X-Jenkins-* headers."""
+    """ASGI middleware that extracts the selected master NAME from the X-Jenkins-Master header.
+
+    Only a master name is read, never credentials. The server holds the read-only token for each
+    configured master and looks it up by name; the name is validated against the fleet allowlist
+    in core.fleet.client_for. This is the token-free model: clients pick a master, the server owns
+    the credentials.
+    """
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -14,36 +19,18 @@ class AuthMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Bypass auth handling for the health probe so kubernetes can poll it without headers
+        # Bypass for the health probe so kubernetes can poll it without headers
         if scope.get('path') == '/healthz':
             await self.app(scope, receive, send)
             return
 
-        # According to ASGI spec, middleware should copy scope when modifying it
+        # ASGI spec: copy scope when modifying it
         scope_copy: Scope = dict(scope)
-
-        # Ensure state exists in scope - this is where Starlette stores request state
         if 'state' not in scope_copy:
             scope_copy['state'] = {}
 
-        # Parse headers from scope (headers are byte tuples per ASGI spec)
         headers = dict(scope_copy.get('headers', []))
+        master_bytes = headers.get(b'x-jenkins-master')
+        scope_copy['state']['jenkins_master'] = master_bytes.decode('latin-1') if master_bytes else None
 
-        jenkins_url_bytes = headers.get(b'x-jenkins-url')
-        jenkins_username_bytes = headers.get(b'x-jenkins-username')
-        jenkins_password_bytes = headers.get(b'x-jenkins-password')
-
-        # Convert bytes to strings (ASGI headers are always bytes)
-        jenkins_url = jenkins_url_bytes.decode('latin-1') if jenkins_url_bytes else None
-        jenkins_username = jenkins_username_bytes.decode('latin-1') if jenkins_username_bytes else None
-        jenkins_password = jenkins_password_bytes.decode('latin-1') if jenkins_password_bytes else None
-
-        # Store in scope state (modify in place so Starlette Request can access it)
-        scope_copy['state']['jenkins_url'] = jenkins_url
-        scope_copy['state']['jenkins_username'] = jenkins_username
-        scope_copy['state']['jenkins_password'] = jenkins_password
-
-        logger.debug(f'[JENKINS-AUTH-MIDDLEWARE] Captured headers - url: {jenkins_url}, username: {jenkins_username}')
-
-        # Call the next application with modified scope and safe send wrapper
         await self.app(scope_copy, receive, send)

@@ -40,15 +40,11 @@ def test_main(mocker):
         [
             '--transport',
             'stdio',
-            '--jenkins-url',
-            'https://example.com',
-            '--jenkins-username',
-            'username',
-            '--jenkins-password',
-            'password',
-            '--jenkins-timeout',
-            '30',
+            '--jenkins-master',
+            'ps80',
+            '--read-only',
         ],
     )
 
     mock_mcp.run_async.assert_called_once_with(transport='stdio')
+    mock_mcp.enable.assert_called_once_with(tags={'read'}, only=True)

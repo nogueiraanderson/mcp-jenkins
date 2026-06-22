@@ -5,88 +5,67 @@ from contextlib import asynccontextmanager
 from fastmcp import Context, FastMCP
 from fastmcp.server.dependencies import get_http_request
 from loguru import logger
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
+from mcp_jenkins.core.fleet import client_for, get_fleet
 from mcp_jenkins.jenkins import Jenkins
 
 
 class LifespanContext(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    jenkins_url: str | None
-    jenkins_username: str | None
-    jenkins_password: str | None
-    jenkins_timeout: int = 5
-    jenkins_verify_ssl: bool = True
-
+    # The master used by per-master tools when the client sends no x-jenkins-master header.
+    default_master: str | None = None
     jenkins_session_singleton: bool = True
 
 
 @asynccontextmanager
 async def lifespan(app: FastMCP[LifespanContext]) -> AsyncIterator['LifespanContext']:
-    jenkins_url = os.getenv('jenkins_url')
-    jenkins_username = os.getenv('jenkins_username')
-    jenkins_password = os.getenv('jenkins_password')
-
-    jenkins_timeout = int(os.getenv('jenkins_timeout', '5'))
-    jenkins_verify_ssl = os.getenv('jenkins_verify_ssl', 'true').lower() == 'true'
-    jenkins_session_singleton = os.getenv('jenkins_session_singleton', 'true').lower() == 'true'
-
     yield LifespanContext(
-        jenkins_url=jenkins_url,
-        jenkins_username=jenkins_username,
-        jenkins_password=jenkins_password,
-        jenkins_timeout=jenkins_timeout,
-        jenkins_verify_ssl=jenkins_verify_ssl,
-        jenkins_session_singleton=jenkins_session_singleton,
+        default_master=os.getenv('jenkins_master') or None,
+        jenkins_session_singleton=os.getenv('jenkins_session_singleton', 'true').lower() == 'true',
     )
+
+
+def _selected_master(ctx: Context) -> str:
+    """Resolve which master a per-master tool targets, by NAME (never client credentials).
+
+    Priority: the x-jenkins-master request header, then the configured default, then the sole
+    configured master. The name is validated against the fleet allowlist inside client_for.
+    """
+    name = None
+    try:
+        name = getattr(get_http_request().state, 'jenkins_master', None)
+    except RuntimeError:
+        pass  # no HTTP request context (e.g. stdio transport)
+    except Exception as e:  # noqa: BLE001
+        logger.error(f'Unexpected error reading request state: {e}')
+
+    name = name or ctx.request_context.lifespan_context.default_master
+    if not name:
+        masters = get_fleet().masters
+        if len(masters) == 1:
+            return masters[0].name
+        msg = (
+            'No Jenkins master selected. Send the x-jenkins-master header, set the jenkins_master '
+            f'default, or configure exactly one master in the fleet. Configured: {get_fleet().names()}'
+        )
+        raise ValueError(msg)
+    return name
 
 
 def jenkins(ctx: Context) -> Jenkins:
-    if ctx.request_context.lifespan_context.jenkins_session_singleton and getattr(ctx.session, 'jenkins', None):
-        return ctx.session.jenkins
+    """Return a Jenkins client for the selected master, with server-held read-only credentials."""
+    name = _selected_master(ctx)
+    singleton = ctx.request_context.lifespan_context.jenkins_session_singleton
 
-    jenkins_url = ctx.request_context.lifespan_context.jenkins_url
-    jenkins_username = ctx.request_context.lifespan_context.jenkins_username
-    jenkins_password = ctx.request_context.lifespan_context.jenkins_password
+    if singleton:
+        cache = getattr(ctx.session, 'jenkins_clients', None)
+        if not isinstance(cache, dict):
+            cache = {}
+            ctx.session.jenkins_clients = cache
+        if name in cache:
+            return cache[name]
 
-    jenkins_timeout = ctx.request_context.lifespan_context.jenkins_timeout
-    jenkins_verify_ssl = ctx.request_context.lifespan_context.jenkins_verify_ssl
-
-    try:
-        requests = get_http_request()
-
-        jenkins_url = getattr(requests.state, 'jenkins_url', None) or jenkins_url
-        jenkins_username = getattr(requests.state, 'jenkins_username', None) or jenkins_username
-        jenkins_password = getattr(requests.state, 'jenkins_password', None) or jenkins_password
-
-        logger.debug(f'Retrieved Jenkins auth from request state - url: {jenkins_url}, username: {jenkins_username}')
-    except RuntimeError as e:
-        logger.debug(f'No HTTP request context available, falling back to environment variables: {e}')
-    except Exception as e:  # noqa: BLE001
-        logger.error(
-            f'Unexpected error retrieving Jenkins auth from request, falling back to environment variables: {e}'
-        )
-
-    if not all((jenkins_url, jenkins_username, jenkins_password)):
-        msg = (
-            'Jenkins authentication details are missing. '
-            'Please provide them via x-jenkins-* headers '
-            'or CLI arguments (--jenkins-url, --jenkins-username, --jenkins-password).'
-        )
-        raise ValueError(msg)
-
-    logger.info(
-        f'Creating Jenkins client with url: '
-        f'{jenkins_url}, username: {jenkins_username}, timeout: {jenkins_timeout}, verify_ssl: {jenkins_verify_ssl}'
-    )
-
-    ctx.session.jenkins = Jenkins(
-        url=jenkins_url,
-        username=jenkins_username,
-        password=jenkins_password,
-        timeout=jenkins_timeout,
-        verify_ssl=jenkins_verify_ssl,
-    )
-
-    return ctx.session.jenkins
+    client = client_for(name)
+    if singleton:
+        ctx.session.jenkins_clients[name] = client
+    return client
