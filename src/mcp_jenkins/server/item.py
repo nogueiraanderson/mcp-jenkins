@@ -3,22 +3,22 @@ from typing import Literal
 
 from fastmcp import Context
 
-from mcp_jenkins.core.lifespan import jenkins
+from mcp_jenkins.core.lifespan import MasterArg, jenkins
 from mcp_jenkins.server import mcp
 
 
 @mcp.tool(tags=['read'])
-async def get_all_items(ctx: Context) -> list[dict]:
+async def get_all_items(ctx: Context, master: MasterArg = None) -> list[dict]:
     """Get all items from Jenkins
 
     Returns:
         A list of items
     """
-    return [item.model_dump(exclude_none=True) for item in jenkins(ctx).get_items()]
+    return [item.model_dump(exclude_none=True) for item in jenkins(ctx, master).get_items()]
 
 
 @mcp.tool(tags=['read'])
-async def get_item(ctx: Context, fullname: str) -> dict:
+async def get_item(ctx: Context, fullname: str, master: MasterArg = None) -> dict:
     """Get specific item from Jenkins
 
     Args:
@@ -27,11 +27,11 @@ async def get_item(ctx: Context, fullname: str) -> dict:
     Returns:
         The item
     """
-    return jenkins(ctx).get_item(fullname=fullname).model_dump(exclude_none=True)
+    return jenkins(ctx, master).get_item(fullname=fullname).model_dump(exclude_none=True)
 
 
 @mcp.tool(tags=['read'])
-async def get_item_config(ctx: Context, fullname: str) -> str:
+async def get_item_config(ctx: Context, fullname: str, master: MasterArg = None) -> str:
     """Get specific item config from Jenkins
 
     Args:
@@ -40,18 +40,18 @@ async def get_item_config(ctx: Context, fullname: str) -> str:
     Returns:
         The config of the item
     """
-    return jenkins(ctx).get_item_config(fullname=fullname)
+    return jenkins(ctx, master).get_item_config(fullname=fullname)
 
 
 @mcp.tool(tags=['write'])
-async def set_item_config(ctx: Context, fullname: str, config_xml: str) -> None:
+async def set_item_config(ctx: Context, fullname: str, config_xml: str, master: MasterArg = None) -> None:
     """Set specific item config in Jenkins
 
     Args:
         fullname: The fullname of the item
         config_xml: The config XML of the item
     """
-    jenkins(ctx).set_item_config(fullname=fullname, config_xml=config_xml)
+    jenkins(ctx, master).set_item_config(fullname=fullname, config_xml=config_xml)
 
 
 @mcp.tool(tags=['read'])
@@ -61,6 +61,7 @@ async def query_items(
     fullname_pattern: str = None,
     color_pattern: str = None,
     folder_depth: int | None = None,
+    master: MasterArg = None,
 ) -> list[dict]:
     """Query items from Jenkins
 
@@ -75,7 +76,7 @@ async def query_items(
     """
     return [
         item.model_dump(exclude_none=True)
-        for item in jenkins(ctx).query_items(
+        for item in jenkins(ctx, master).query_items(
             class_pattern=class_pattern,
             fullname_pattern=fullname_pattern,
             color_pattern=color_pattern,
@@ -90,6 +91,7 @@ async def build_item(
     fullname: str,
     build_type: Literal['build', 'buildWithParameters'],
     data: dict | None = None,
+    master: MasterArg = None,
 ) -> int:
     """Build an item in Jenkins
 
@@ -101,11 +103,11 @@ async def build_item(
     Returns:
         The queue item number of the item.
     """
-    return jenkins(ctx).build_item(fullname=fullname, build_type=build_type, data=data)
+    return jenkins(ctx, master).build_item(fullname=fullname, build_type=build_type, data=data)
 
 
 @mcp.tool(tags=['read'])
-async def get_item_parameters(ctx: Context, fullname: str) -> list[dict]:
+async def get_item_parameters(ctx: Context, fullname: str, master: MasterArg = None) -> list[dict]:
     """Get the parameter definitions of a Jenkins job
 
     Args:
@@ -114,7 +116,7 @@ async def get_item_parameters(ctx: Context, fullname: str) -> list[dict]:
     Returns:
         A list of parameter definitions, each containing name, type, defaultValue, and description
     """
-    config_xml = jenkins(ctx).get_item_config(fullname=fullname)
+    config_xml = jenkins(ctx, master).get_item_config(fullname=fullname)
     root = ET.fromstring(config_xml)
 
     params = []

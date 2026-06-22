@@ -1,11 +1,11 @@
 from fastmcp import Context
 
-from mcp_jenkins.core.lifespan import jenkins
+from mcp_jenkins.core.lifespan import MasterArg, jenkins
 from mcp_jenkins.server import mcp
 
 
 @mcp.tool(tags={'write'})
-async def run_groovy_script(ctx: Context, script: str) -> str:
+async def run_groovy_script(ctx: Context, script: str, master: MasterArg = None) -> str:
     """Execute an arbitrary Groovy script on Jenkins.
 
     This tool provides access to Jenkins internal features that are not available via REST API.
@@ -29,4 +29,4 @@ async def run_groovy_script(ctx: Context, script: str) -> str:
             '''
         )
     """
-    return jenkins(ctx).run_script(script=script)
+    return jenkins(ctx, master).run_script(script=script)

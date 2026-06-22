@@ -36,8 +36,7 @@ if sys.platform == 'win32':
 @click.option(
     '--jenkins-session-singleton/--no-jenkins-session-singleton',
     default=True,
-    help='In the same session, reuse the per-master Jenkins client, '
-    'reducing instantiations and crumb requests',
+    help='In the same session, reuse the per-master Jenkins client, reducing instantiations and crumb requests',
 )
 @click.option(
     '--transport',

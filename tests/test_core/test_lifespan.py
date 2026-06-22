@@ -45,6 +45,17 @@ class TestJenkins:
         mock_client_for.assert_called_once_with('ps80')
         assert result == mock_client_for.return_value
 
+    def test_master_arg_overrides_header(
+        self, mock_client_for, mock_get_fleet, mock_get_http_request, mock_ctx, mocker
+    ):
+        # An explicit per-call master argument wins over the header pin and the default.
+        mock_get_http_request.return_value = mocker.Mock(state=mocker.Mock(jenkins_master='ps80'))
+        mock_ctx.request_context.lifespan_context.default_master = 'ps57'
+
+        jenkins(mock_ctx, 'pxc')
+
+        mock_client_for.assert_called_once_with('pxc')
+
     def test_master_from_default(self, mock_client_for, mock_get_fleet, mock_get_http_request, mock_ctx):
         mock_get_http_request.side_effect = RuntimeError('no http request')
         mock_ctx.request_context.lifespan_context.default_master = 'ps57'

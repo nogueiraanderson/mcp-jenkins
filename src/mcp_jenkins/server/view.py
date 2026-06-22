@@ -1,21 +1,21 @@
 from fastmcp import Context
 
-from mcp_jenkins.core.lifespan import jenkins
+from mcp_jenkins.core.lifespan import MasterArg, jenkins
 from mcp_jenkins.server import mcp
 
 
 @mcp.tool(tags=['read'])
-async def get_all_views(ctx: Context) -> list[dict]:
+async def get_all_views(ctx: Context, master: MasterArg = None) -> list[dict]:
     """Get all top-level views from Jenkins.
 
     Returns:
         A list of views with their name and URL.
     """
-    return jenkins(ctx).get_views()
+    return jenkins(ctx, master).get_views()
 
 
 @mcp.tool(tags=['read'])
-async def get_view(ctx: Context, view_path: str, depth: int = 0) -> dict:
+async def get_view(ctx: Context, view_path: str, depth: int = 0, master: MasterArg = None) -> dict:
     """Get a Jenkins view by path, returning its jobs and/or nested sub-views.
 
     Views can be nested up to multiple levels deep. Use "/" to separate levels
@@ -31,4 +31,4 @@ async def get_view(ctx: Context, view_path: str, depth: int = 0) -> dict:
     Returns:
         A dict with the view's name, jobs list, and/or nested views.
     """
-    return jenkins(ctx).get_view(view_path=view_path, depth=depth)
+    return jenkins(ctx, master).get_view(view_path=view_path, depth=depth)
