@@ -214,6 +214,7 @@ async def get_readme() -> str:
         '  - get_all_items / query_items return a flat compact list capped by limit (total + truncated reported).',
         '  - On a big master, narrow with query_items(fullname_pattern=...) rather than raising limit.',
         '  - number defaults to the most recent build when omitted (except stop_build, which needs one).',
-        '  - Operate tools need the jenkins-mcp-writers group (refused otherwise); reads need jenkins-mcp-users.',
+        '  - Reads are open to any authenticated Percona user (Duo SSO login).',
+        '  - Operate tools additionally need the jenkins-mcp-writers group (refused otherwise).',
     ]
     return '\n'.join(lines)
